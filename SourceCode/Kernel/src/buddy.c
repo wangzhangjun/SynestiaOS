@@ -1,6 +1,13 @@
 #include "libc/stdint.h"
 #include "arm/page.h"
 
+#define offsetof(TYPE, MEMBER) ((unsigned int) &((TYPE *) 0)->MEMBER)
+#define container_of(ptr, type, member) ({			\
+	const typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+		(type *)( (char *)__mptr - offsetof(type,member) ); })
+#define list_entry(ptr, type, member) \
+    container_of(ptr, type, member)
+
 struct list_head {
     struct list_head *next, *prev;
 };
@@ -92,6 +99,10 @@ struct page {
 #define PAGE_BUDDY_BUSY 0x04
 #define PAGE_IN_CACHE 0x08
 
+#define BUDDY_END(x, order) ((x) + (1 << (order)) - 1)//x是一个page的地址，然后往后跳几个，跳到第一个buddy的末尾，比如2的2次方，list_entry得到的是第一个Buddy中的第一个page的值，那要想得到第一个buddy中的最后一个page的值，就是加上2的2次方减1
+#define NEXT_BUDDY_START(x, order) ((x) + (1 << (order)))
+#define PREV_BUDDY_START(x, order) ((x) - (1 << (order)))
+
 struct list_head page_buddy[MAX_BUDDY_PAGE_NUM];
 extern uint32_t __KERNEL_END;
 
@@ -125,6 +136,45 @@ void init_page_map(void) {
         }
     }
 }
+
+//buddy的申请和释放
+struct page* get_pages_from_list(int order)
+{
+    int neworder = order;
+    struct page *pg;
+    struct list_head *tlst, *tlst1;
+
+    for(;neworder < MAX_BUDDY_PAGE_NUM; neworder++){
+        if(list_empty(&page_buddy[neworder])) {
+            continue;  //如果该链表是空的，则查找下一个链表
+        }else{
+            //找到了之后，就返回这个page，然后再把链表续上
+            pg = list_entry(page_buddy[neworder].next, struct page, list);
+            tlst = &(BUDDY_END(pg, neworder)->list);
+            tlst->next->prev = &page_buddy[neworder];//这两句的意思是把找到的buddy拆下来，前后再接上
+            page_buddy[neworder].next = tlst->next;
+            goto OUT_OK;
+        }
+    }
+    return nullptr;
+OUT_OK:
+    //如果说是从比本来要申请的order大的链表上申请下来的，那么就要拆分再放到不同的链表中
+    for (neworder--; neworder >= order; neworder--){
+
+        //拆分出比order小的第一个链表的buddy
+        tlst1 = &(BUDDY_END(pg, neworder)->list);  
+        tlst = &(pg->list);  
+
+        pg = NEXT_BUDDY_START(pg, neworder);  //pg跳到上面拆分剩下的开始
+        list_entry(tlst, struct page, list)->order = neworder;
+        list_add_chain_tail(tlst, tlst1, &page_buddy[neworder]);
+    }
+    //如果说刚好就在目标order上找到了，就返回pg
+    pg->flags |= PAGE_BUDDY_BUSY;
+    pg->order = order;
+    return pg;
+}
+
 
 void init_buddy_alloc(uint32_t base, uint32_t size) {
     printf("in buddy base : 0x%p\n", base);
