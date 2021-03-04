@@ -130,6 +130,10 @@ void kernel_main(void) {
         // init kernel virtual memory mapping
         kernel_vmm_init();
 
+        //buddy allocate test
+        init_buddy_alloc((uint32_t) &__KERNEL_END + PAGE_SIZE, KERNEL_PHYSICAL_SIZE - (uint32_t) &__KERNEL_END);
+        return;
+
         scheduler_create(&cfsScheduler);
 
         // create kernel heap
