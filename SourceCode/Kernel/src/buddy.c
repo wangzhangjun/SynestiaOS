@@ -77,6 +77,7 @@ struct page {
 
 #define PAGE_SHIFT (12)//一页是4k
 #define PAGE_MASK (~(PAGE_SIZE - 1))
+
 #define _MEM_START (uint32_t) & __KERNEL_END + PAGE_SIZE//伙伴算法能够操作的开始的位置
 #define _MEM_SIZE KERNEL_PHYSICAL_SIZE - (uint32_t) &__KERNEL_END
 #define _MEM_END _MEM_START + _MEM_SIZE//伙伴算法能够操作的结束的位置
@@ -84,12 +85,12 @@ struct page {
 #define KERNEL_MEM_END (_MEM_END)
 #define KERNEL_PAGING_START ((_MEM_START + (~PAGE_MASK)) & ((PAGE_MASK)))                                                                   //_MEM_START的值按照PAGE_SIZE对齐，不对齐则取整，自动对齐
 #define KERNEL_PAGING_END (((KERNEL_MEM_END - KERNEL_PAGING_START) / (PAGE_SIZE + sizeof(struct page))) * (PAGE_SIZE) + KERNEL_PAGING_START)//在这段内存里面不仅要存放页还要存放struct page,这个其实是页存放的结束地址，后面还有struct page
-#define KERNEL_PAGE_NUM ((KERNEL_PAGING_END - KERNEL_PAGING_START) / PAGE_SIZE)                                                             //页是多少个
+#define KERNEL_PAGE_NUM ((KERNEL_PAGING_END - KERNEL_PAGING_START) / (1 << PAGE_SHIFT))//页是多少个
 
 #define KERNEL_PAGE_START (KERNEL_PAGE_END - KERNEL_PAGE_NUM * sizeof(struct page))//存放struct page结构体的开始的地方
 #define KERNEL_PAGE_END _MEM_END                                                   //struct page的结束的地方就是_MEM_END
 
-#define MAX_BUDDY_PAGE_NUM (10)                               //先存放10个链表，2的10次方，一次最多分配2m的大小的内存
+#define MAX_BUDDY_PAGE_NUM (9)                               //先存放10个链表，2的10次方，一次最多分配2m的大小的内存
 #define PAGE_NUM_FOR_MAX_BUDDY ((1 << MAX_BUDDY_PAGE_NUM) - 1)//最大数组的struct page的个数
 
 /*page flags*/
@@ -119,6 +120,7 @@ void init_page_map(void) {
     struct page *pg = (struct page *) KERNEL_PAGE_START;//第一个struct page开始的地方
     for (int i = 0; i < KERNEL_PAGE_NUM; i++) {
         pg->vaddr = KERNEL_PAGING_START + i * PAGE_SIZE;//第一个struct page对应的地方就是第一个页的地址，第二个，第三个往下推
+       
         pg->flags = PAGE_AVAILABLE;                     //flags，标志页和结构体
         pg->counter = 0;                                //表示该页被使用的次数
         INIT_LIST_HEAD(&(pg->list));
@@ -134,12 +136,14 @@ void init_page_map(void) {
             pg->order = 0;
             list_add_tail(&(pg->list), &page_buddy[0]);
         }
+        // printf("init buddy...\n");
     }
 }
 
 //buddy的申请和释放
 struct page* get_pages_from_list(int order)
 {
+    unsigned int vaddr;
     int neworder = order;
     struct page *pg;
     struct list_head *tlst, *tlst1;
@@ -157,6 +161,7 @@ struct page* get_pages_from_list(int order)
         }
     }
     return nullptr;
+
 OUT_OK:
     //如果说是从比本来要申请的order大的链表上申请下来的，那么就要拆分再放到不同的链表中
     for (neworder--; neworder >= order; neworder--){
@@ -172,15 +177,40 @@ OUT_OK:
     //如果说刚好就在目标order上找到了，就返回pg
     pg->flags |= PAGE_BUDDY_BUSY;
     pg->order = order;
+    
     return pg;
 }
 
+struct page*  alloc_pages(int order, uint32_t flag)
+{
+    struct page *pg = get_pages_from_list(order);
+    if(pg == nullptr) 
+        return nullptr;
+    for(int i = 0; i < (1 << order); i++) {
+       (pg + i)->flags |= PAGE_DIRTY; 
+    }
+ 
+    return pg;
+};
+
+void * get_free_pages(int order, uint32_t flag)
+{
+    struct page *page;
+    page = alloc_pages(flag, order);
+    if (!page) return nullptr;
+    return (void *)(page->vaddr);
+}
 
 void init_buddy_alloc(uint32_t base, uint32_t size) {
-    printf("in buddy base : 0x%p\n", base);
-    printf("in buddy base+size : 0x%p\n", base + size);
-    printf("in buddy size : 0x%p\n", size);//172M的内存可用
-    printf("in buddy _MEM_START : 0x%p\n", _MEM_START);
-    printf("in buddy _MEM_END : x0%p\n", _MEM_END);
+    printf("in buddy base : %x\n", base);
+    printf("in buddy base+size : %x\n", base + size);
+    printf("in buddy size : %x\n", size);//171M 内存可用
+    printf("in buddy _MEM_START : %x\n", _MEM_START);
+    printf("in buddy _MEM_END : %x\n", _MEM_END);
+    printf("in buddy page start : %x\n", KERNEL_PAGING_START);
+    printf("in buddy page end : %x\n", KERNEL_PAGING_END);
+    printf("in buddy KERNEL_PAGE_NUM : %x\n", KERNEL_PAGE_NUM);
     init_page_map();
+    char *pageAddr = (char *)get_free_pages(6,0);
+    printf("buddy return address is : %x\n", pageAddr);
 }
