@@ -116,9 +116,9 @@ void init_page_buddy(void) {
 }
 
 void init_page_map(void) {
-    init_page_buddy();
     struct page *pg = (struct page *) KERNEL_PAGE_START;//第一个struct page开始的地方
-    for (int i = 0; i < KERNEL_PAGE_NUM; i++) {
+    init_page_buddy();
+    for (int i = 0; i < (KERNEL_PAGE_NUM); pg++, i++) {
         pg->vaddr = KERNEL_PAGING_START + i * PAGE_SIZE;//第一个struct page对应的地方就是第一个页的地址，第二个，第三个往下推
         pg->flags = PAGE_AVAILABLE;                     //flags，标志页和结构体
         pg->counter = 0;                                //表示该页被使用的次数
@@ -163,7 +163,6 @@ struct page* get_pages_from_list(int order)
 OUT_OK:
     //如果说是从比本来要申请的order大的链表上申请下来的，那么就要拆分再放到不同的链表中
     for (neworder--; neworder >= order; neworder--){
-
         //拆分出比order小的第一个链表的buddy
         tlst1 = &(BUDDY_END(pg, neworder)->list);  
         tlst = &(pg->list);  
@@ -175,28 +174,81 @@ OUT_OK:
     //如果说刚好就在目标order上找到了，就返回pg
     pg->flags |= PAGE_BUDDY_BUSY;
     pg->order = order;
-    
     return pg;
 }
 
-struct page*  alloc_pages(int order, uint32_t flag)
-{
+void put_pages_to_list(struct page *pg, int order) {
+    struct page *tprev, *tnext;
+    if (!(pg->flags & PAGE_BUDDY_BUSY)) {
+        printf("something must be wrong when you see this message,that probably means you are forcing to release a page that was not alloc at all\n");
+        return;
+    }
+    pg->flags &= ~(PAGE_BUDDY_BUSY);
+
+    for (; order < MAX_BUDDY_PAGE_NUM; order++) {
+        tnext = NEXT_BUDDY_START(pg, order);
+        tprev = PREV_BUDDY_START(pg, order);
+        //合并前后的buddy，然后插入到新的order链表中
+        if ((!(tnext->flags & PAGE_BUDDY_BUSY)) && (tnext->order == order)) {
+            pg->order++;
+            tnext->order = -1;
+            list_remove_chain(&(tnext->list), &(BUDDY_END(tnext, order)->list));
+            BUDDY_END(pg, order)->list.next = &(tnext->list);
+            tnext->list.prev = &(BUDDY_END(pg, order)->list);
+            continue;
+        } else if ((!(tprev->flags & PAGE_BUDDY_BUSY)) && (tprev->order == order)) {
+            pg->order = -1;
+
+            list_remove_chain(&(pg->list), &(BUDDY_END(pg, order)->list));
+            BUDDY_END(tprev, order)->list.next = &(pg->list);
+            pg->list.prev = &(BUDDY_END(tprev, order)->list);
+
+            pg = tprev;
+            pg->order++;
+            continue;
+        } else {
+            break;
+        }
+    }
+
+    list_add_chain(&(pg->list), &((tnext - 1)->list), &page_buddy[order]);
+}
+
+struct page *alloc_pages(uint32_t flag, int order) {
     struct page *pg = get_pages_from_list(order);
     if(pg == nullptr) 
         return nullptr;
     for(int i = 0; i < (1 << order); i++) {
        (pg + i)->flags |= PAGE_DIRTY; 
     }
- 
     return pg;
 };
 
-void * get_free_pages(int order, uint32_t flag)
-{
+void *get_free_pages(uint32_t flag, int order) {
     struct page *page;
     page = alloc_pages(flag, order);
     if (!page) return nullptr;
     return (void *)(page->vaddr);
+}
+struct page *virt_to_page(unsigned int addr)//找到该内存地址对应的struct page的开始位置
+{
+    unsigned int i;
+    i = ((addr) -KERNEL_PAGING_START) >> PAGE_SHIFT;
+    if (i > KERNEL_PAGE_NUM)
+        return nullptr;
+    return (struct page *) KERNEL_PAGE_START + i;
+}
+void free_pages(struct page *pg, int order) {
+    int i;
+    for (i = 0; i < (1 << order); i++) {
+        (pg + i)->flags &= ~PAGE_DIRTY;
+    }
+    put_pages_to_list(pg, order);
+}
+
+void put_free_pages(void *addr, int order)
+{
+    free_pages(virt_to_page((unsigned int) addr), order);
 }
 
 void init_buddy_alloc(uint32_t base, uint32_t size) {
@@ -209,6 +261,13 @@ void init_buddy_alloc(uint32_t base, uint32_t size) {
     printf("in buddy page end : %x\n", KERNEL_PAGING_END);
     printf("in buddy KERNEL_PAGE_NUM : %x\n", KERNEL_PAGE_NUM);
     init_page_map();
-    char *pageAddr = (char *)get_free_pages(6,0);
-    printf("buddy return address is : %x\n", pageAddr);
+    char *pageAddr = (char *)get_free_pages(0,6);
+    printf("buddy return address pageAddr is : %x\n", pageAddr);
+    char *pageAddr2 = (char *) get_free_pages(0, 6);
+    printf("buddy return address pageAddr2 is : %x\n", pageAddr2);
+    put_free_pages(pageAddr, 6);
+    put_free_pages(pageAddr2, 6);
+    char *p3 = (char *) get_free_pages(0, 7);
+    printf("buddy return address pageAddr3 is : %x\n", p3);
+    put_free_pages(p3, 7);
 }
