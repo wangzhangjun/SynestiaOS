@@ -90,7 +90,7 @@ struct page {
 #define KERNEL_PAGE_START (KERNEL_PAGE_END - KERNEL_PAGE_NUM * sizeof(struct page))//存放struct page结构体的开始的地方
 #define KERNEL_PAGE_END _MEM_END                                                   //struct page的结束的地方就是_MEM_END
 
-#define MAX_BUDDY_PAGE_NUM (9)                               //先存放10个链表，2的10次方，一次最多分配2m的大小的内存
+#define MAX_BUDDY_PAGE_NUM (9)                               //先存放9个链表，2的8次方，一次最多分配1m的大小的内存
 #define PAGE_NUM_FOR_MAX_BUDDY ((1 << MAX_BUDDY_PAGE_NUM) - 1)//最大数组的struct page的个数
 
 /*page flags*/
