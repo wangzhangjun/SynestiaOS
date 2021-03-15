@@ -120,7 +120,6 @@ void init_page_map(void) {
     struct page *pg = (struct page *) KERNEL_PAGE_START;//第一个struct page开始的地方
     for (int i = 0; i < KERNEL_PAGE_NUM; i++) {
         pg->vaddr = KERNEL_PAGING_START + i * PAGE_SIZE;//第一个struct page对应的地方就是第一个页的地址，第二个，第三个往下推
-       
         pg->flags = PAGE_AVAILABLE;                     //flags，标志页和结构体
         pg->counter = 0;                                //表示该页被使用的次数
         INIT_LIST_HEAD(&(pg->list));
@@ -136,7 +135,6 @@ void init_page_map(void) {
             pg->order = 0;
             list_add_tail(&(pg->list), &page_buddy[0]);
         }
-        // printf("init buddy...\n");
     }
 }
 
